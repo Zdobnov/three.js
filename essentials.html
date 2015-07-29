@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+
+		<style>
+			* {
+				margin:0;
+				padding:0;
+			}
+			body {
+				width: 100%;
+				height: 100%;
+				overflow: hidden;
+			}
+		</style>
+	</head>
+	<body>
+
+		<script src="libs/three.min.js"></script>
+		<script src="libs/dat.gui.min.js"></script>
+		<script src="libs/stats.min.js"></script>
+
+		<!--trackball camera-->
+		<script src="libs/TrackballControls.js"></script>
+
+		<script>
+
+			var scene,
+				camera,
+				renderer,
+				axes,			//axes for help
+				cameraControl,	//camera
+				controls;		//gui
+			
+			function init() {
+				//scene
+				scene = new THREE.Scene();
+
+				//camera
+				camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+				camera.position.set(-30,40,30);
+				camera.lookAt(scene.position);
+
+				//renderer
+				renderer = new THREE.WebGLRenderer();
+				renderer.setClearColor(0xcccccc);
+				renderer.setSize(window.innerWidth, window.innerHeight);
+				renderer.shadowMapEnabled = true;
+
+				//axes
+				// axes = new THREE.AxisHelper(20);
+				// scene.add(axes);
+
+				//helper grid
+		        var gridXZ = new THREE.GridHelper(50, 5),
+		        	gridXY = new THREE.GridHelper(50, 5),
+		        	gridYZ = new THREE.GridHelper(50, 5);
+				gridXZ.setColors(new THREE.Color(0xff00ff),new THREE.Color(0x888888));
+				gridXZ.position.set(0,0,0);
+				gridXZ.material.transparent = true;
+				gridXZ.material.opacity = 0.25;
+				scene.add(gridXZ);
+				gridXY.setColors(new THREE.Color(0xffff00),new THREE.Color(0x888888));
+				gridXY.position.set(0,0,0);
+				gridXY.rotation.x = 0.5*Math.PI;
+				gridXY.material.transparent = true;
+				gridXY.material.opacity = 0.25;
+				scene.add(gridXY);
+				gridYZ.setColors(new THREE.Color(0x00ffff),new THREE.Color(0x888888));
+				gridYZ.position.set(0,0,0);
+				gridYZ.rotation.z = 0.5*Math.PI;
+				gridYZ.material.transparent = true;
+				gridYZ.material.opacity = 0.25;
+				scene.add(gridYZ);
+
+
+				//objects begin -----------------
+
+				//plane
+				var planeGeometry = new THREE.PlaneGeometry(60,20,1,1);
+				var planeMaterial = new THREE.MeshPhongMaterial({
+					color: 0xaaaaaa,
+					side: THREE.DoubleSide
+				});
+				var plane = new THREE.Mesh(planeGeometry,planeMaterial);
+				plane.rotation.x=-0.5*Math.PI;
+				plane.position.set(10,-0.1,0);
+				plane.receiveShadow = true;
+				plane.name="plane";
+				scene.add(plane);
+
+				//cube
+				var cubeGeometry = new THREE.CubeGeometry(4,4,4);
+				var cubeMaterial = new THREE.MeshPhongMaterial({
+					color: 0xff0000,
+					wireframe: true
+				});
+				var cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
+				cube.position.set(-4,3,0);
+				cube.castShadow = true;
+				cube.name="cube";
+				scene.add(cube);
+
+				//sphere
+				var sphereGeometry = new THREE.SphereGeometry(4,20,20);
+				var sphereMaterial = new THREE.MeshNormalMaterial({
+					color: 0x7777ff,
+					shading: THREE.FlatShading
+					// wireframe: true
+				});
+				var sphere = new THREE.Mesh(sphereGeometry,sphereMaterial);
+				sphere.position.set(20,4,2);
+				sphere.castShadow = true;
+				sphere.name="sphere";
+				scene.add(sphere);
+
+				//objects end -----------------
+
+				var spotLight = new THREE.SpotLight( 0xffffff );
+				spotLight.position.set( -40, 60, -10 );
+				spotLight.castShadow = true;
+				spotLight.shadowCameraVisible = true;
+				spotLight.shadowCameraNear = 50;
+				spotLight.shadowCameraFar = 110;
+				scene.add(spotLight);
+
+				// add controls
+				cameraControl = new THREE.TrackballControls(camera);
+
+				// setup the control object for the control gui
+		        // controls = new function() {
+		        //     this.rotationSpeed = 0.02;
+		        // };
+
+		        // add extras
+		        // addControlGui(controls);
+		        addStatsObject();
+
+				// add the output of the renderer to the html element
+		        document.body.appendChild(renderer.domElement);
+
+		        // call the render function, after the first render, interval is determined
+		        // by requestAnimationFrame
+		        render();
+			}
+
+			// function addControlGui(controlObject) {
+		 //        var gui = new dat.GUI();
+		 //    }
+
+		    function addStatsObject() {
+		        stats = new Stats();
+		        stats.setMode(0);
+		        stats.domElement.style.position = 'absolute';
+		        stats.domElement.style.left = '0px';
+		        stats.domElement.style.top = '0px';
+		        document.body.appendChild( stats.domElement );
+		    }
+
+		    /**
+		     * Called when the scene needs to be rendered. Delegates to requestAnimationFrame
+		     * for future renders
+		     */
+		    function render() {
+		    	scene.getObjectByName('cube').rotation.x += 0.02;
+				scene.getObjectByName('cube').rotation.y += 0.02;
+				scene.getObjectByName('cube').rotation.z += 0.02;
+
+		    	// update the camera
+        		cameraControl.update();
+
+		        // update stats
+		        stats.update();
+
+		        // and render the scene
+		        renderer.render(scene, camera);
+
+		        // render using requestAnimationFrame
+		        requestAnimationFrame(render);
+		    }
+
+
+		    /**
+		     * Function handles the resize event. This make sure the camera and the renderer
+		     * are updated at the correct moment.
+		     */
+		    function handleResize() {
+		        camera.aspect = window.innerWidth / window.innerHeight;
+		        camera.updateProjectionMatrix();
+		        renderer.setSize(window.innerWidth, window.innerHeight);
+		    }
+
+		    // calls the init function when the window is done loading.
+		    window.onload = init;
+		    // calls the handleResize function when the window is resized
+		    window.addEventListener('resize', handleResize, false);
+
+		</script>
+	</body>
+</html>

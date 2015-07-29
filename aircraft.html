@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<link href='http://fonts.googleapis.com/css?family=Black+Ops+One' rel='stylesheet' type='text/css'>
+		<style>
+
+			* {
+				margin:0;
+				padding:0;
+			}
+			body {
+				width: 100%;
+				height: 100%;
+				overflow: hidden;
+			}
+			#signal_lost {
+				display: none;
+				position: absolute;
+				z-index: 100;
+				text-align:center;
+				vertical-align: middle;
+				left: 0;
+				top: 0;
+				width: 100%;
+				height: 100%;
+			}
+			#signal_lost span {
+				color: white;
+				font: 64px 'Black Ops One', cursive;
+				padding: 8px 24px;
+				background: red;
+				vertical-align: middle;
+			}
+			#signal_lost:after {
+				content:'';
+				display: inline-block;
+				vertical-align: middle;
+				height: 100%;
+				width: 0;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="signal_lost">
+			<span>SIGNAL LOST</span>
+		</div>
+
+		<script src="libs/three.min.js"></script>
+		<script src="libs/dat.gui.min.js"></script>
+		<script src="libs/stats.min.js"></script>
+		<script src="libs/OrbitControls.js"></script>
+		<script src="libs/perlin/perlin.js"></script>
+		<script src="libs/SpriteParticleSystem.js"></script>
+
+		<!-- glitch -->
+
+		<script src="libs/glitch/CopyShader.js"></script>
+		<script src="libs/glitch/DigitalGlitch.js"></script>
+		<script src="libs/glitch/EffectComposer.js"></script>
+		<script src="libs/glitch/RenderPass.js"></script>
+		<script src="libs/glitch/MaskPass.js"></script>
+		<script src="libs/glitch/ShaderPass.js"></script>
+		<script src="libs/glitch/GlitchPass.js"></script>
+		<!-- glitch end -->
+
+		<script>
+			// http://blog.thematicmapping.org/2013/10/terrain-building-with-threejs.html - how terrain works
+			// http://habrahabr.ru/post/170521/
+			// https://gist.github.com/banksean/304522
+			// http://graphic-sim.com/B_basic_export.html
+			// http://staffwww.itn.liu.se/~stegu/simplexnoise/simplexnoise.pdf
+
+
+
+			// global variables
+		    var renderer;
+		    var scene;
+		    var camera;
+		    var control;	//GUI
+		    var stats;		//FPS
+
+		    var cameraControl;	//ortagonal camera
+
+		    //moving & rotation
+		    var clock = new THREE.Clock();
+		    // ---
+		    var rotationSpeed = 1;
+  			var translationSpeed = 50;
+  			var rotationAngle = (Math.PI*2)/360;
+  			// ---
+  			var rotateLeft = false;
+			var rotateRight = false;
+			var pitchUp = false;
+			var dive = false;
+			var rollLeft = false;
+			var rollRight = false;
+			var moveAhead = false;
+			var moveBackwards = false;
+			window.onkeydown = onKeyDown;
+			window.onkeyup = onKeyUp;
+
+			//aircraft model
+			var aircraft;
+
+			//particles
+			var leftEngine, rightEngine;
+
+			//out of border
+			var outOfBorder = false;
+
+			//glitch
+			var glitchPass, composer;
+
+		    /*
+			* Initializes the scene, camera and objects. Called when the window is
+			* loaded by using window.onload (see below)
+			*/
+			function init() {
+				// create a scene, that will hold all our elements such as objects, cameras and lights.
+		        scene = new THREE.Scene();
+		        scene.fog = new THREE.FogExp2( 0xcfb9a8, 0.0015 );
+
+		        // create a camera, which defines where we're looking at.
+		        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100000);
+
+		        // create a render, sets the background color and the size
+		        renderer = new THREE.WebGLRenderer();
+		        renderer.setClearColor( 0xcfb9a8 );
+		        renderer.setSize(window.innerWidth, window.innerHeight);
+		        renderer.shadowMapEnabled = true;
+
+		        /*
+		        ========== OBJECTS ==========
+		        */
+
+				//ground
+				var planeGeometry = new THREE.PlaneGeometry(6000,6000,10,10);
+				var planeMaterial = new THREE.MeshPhongMaterial({
+					color: 0x356d7f,
+					transparent: true,
+					opacity: 0.15,
+					normalMap: new THREE.ImageUtils.loadTexture( "images/materials/waternormals.jpg" ),
+					normalScale: new THREE.Vector2( 5, 5 ),
+					side: THREE.DoubleSide
+				});
+				var plane = new THREE.Mesh(planeGeometry,planeMaterial);
+				plane.recieveShadow = true;
+				plane.rotation.x=-0.5*Math.PI;
+				plane.position.set(0,0,0);
+				plane.receiveShadow = true;
+				plane.name="plane";
+				scene.add(plane);
+
+				var borderGeometry = new THREE.BoxGeometry(2002,4002,2002);
+				var borderMaterial = new THREE.MeshBasicMaterial({
+					color: 0xaaaaaa,
+					side: THREE.DoubleSide,
+					transparent: true,
+					map: new THREE.ImageUtils.loadTexture( "images/particles/border_pattern_opacity.png" )
+				});
+				var border = new THREE.Mesh(borderGeometry,borderMaterial);
+				border.position.set(0,0,0);
+				border.receiveShadow = true;
+				border.name="border";
+				scene.add(border);
+
+				// var terrain = [
+				// 	[3, 2, 2, 5, 8],
+				// 	[2, 1, 2, 3, 6],
+				// 	[1, 1, 1, 2, 4],
+				// 	[1, 1, 1, 3, 4],
+				// 	[1, 1, 1, 4, 4]
+				// ];
+
+				//create square
+				var terrain = [];
+				var size = 300;
+				var xx,xy,xz;
+				noise.seed(Math.random());
+				for(xx = 0; xx < size; xx+=1) {
+					var helpArray = [];
+					for(xy = 0; xy < size; xy+=1) {
+						var a = helpArray.push(noise.simplex3(xx / 100, xy / 100, 0.01)*100);
+					}
+					terrain.push(helpArray);
+				}
+
+				var geom = new THREE.Geometry();
+				var width = terrain[0].length - 1;
+				var height = terrain.length - 1;
+				var w = 20;
+				var counter = 0;
+				for(var i = 0; i < width; i++){
+					for(var j = 0; j < height; j++){
+					var faceIndexBace = counter * 6;
+					var y = [
+						terrain[j  ][i  ] * w / 3,
+						terrain[j  ][i+1] * w / 3,
+						terrain[j+1][i  ] * w / 3,
+						terrain[j+1][i+1] * w / 3
+					];
+					//square : triangle1 + triangle2
+						// triangle1
+						(function(){
+							var v1 = new THREE.Vector3(      i * w, y[0],        (-1 * j) * w);
+							var v2 = new THREE.Vector3((1 + i) * w, y[1],        (-1 * j) * w);
+							var v3 = new THREE.Vector3(      i * w, y[2], (-1 + (-1 * j)) * w);
+							geom.vertices.push(v1);
+							geom.vertices.push(v2);
+							geom.vertices.push(v3);
+							
+							var face = new THREE.Face3( faceIndexBace , faceIndexBace + 1, faceIndexBace + 2 );
+							face.normal = (function (){
+								var vx = (v1.y - v3.y) * (v2.z - v3.z) - (v1.z - v3.z) * (v2.y - v3.y);
+								var vy = (v1.z - v3.z) * (v2.x - v3.x) - (v1.x - v3.x) * (v2.z - v3.z);
+								var vz = (v1.x - v3.x) * (v2.y - v3.y) - (v1.y - v3.y) * (v2.x - v3.x);
+								var va = Math.sqrt( Math.pow(vx,2) +Math.pow(vy,2)+Math.pow(vz,2));
+								return new THREE.Vector3( vx/va, vy/va, vz/va);
+							})();
+							geom.faces.push( face );
+						})();
+						// triangle2
+						(function(){
+							var v1 = new THREE.Vector3( (1 + i) * w, y[1],        (-1 * j) * w);
+							var v2 = new THREE.Vector3( (1 + i) * w, y[3], (-1 + (-1 * j)) * w);
+							var v3 = new THREE.Vector3(       i * w, y[2], (-1 + (-1 * j)) * w);
+							geom.vertices.push(v1);
+							geom.vertices.push(v2);
+							geom.vertices.push(v3);
+							var face = new THREE.Face3( faceIndexBace + 3, faceIndexBace + 4, faceIndexBace + 5 );
+							face.normal = (function (){
+								var vx = (v1.y - v3.y) * (v2.z - v3.z) - (v1.z - v3.z) * (v2.y - v3.y);
+								var vy = (v1.z - v3.z) * (v2.x - v3.x) - (v1.x - v3.x) * (v2.z - v3.z);
+								var vz = (v1.x - v3.x) * (v2.y - v3.y) - (v1.y - v3.y) * (v2.x - v3.x);
+								var va = Math.sqrt( Math.pow(vx,2) +Math.pow(vy,2)+Math.pow(vz,2));
+								return new THREE.Vector3( vx/va, vy/va, vz/va);
+							})();
+							geom.faces.push( face );
+						})();
+						counter++;
+					}
+				}
+				var mesh= new THREE.Mesh(
+					geom,
+					new THREE.MeshLambertMaterial( {
+						color: 0xcfb9a8,
+						// side: THREE.DoubleSide
+					} )
+				);
+				mesh.recieveShadow = true;
+				mesh.position.x = -1 * width / 2 * w;
+				mesh.position.z = height / 2  * w;
+				scene.add(mesh);
+
+				/* === PLAYER === */
+				//aircraft
+				var jsonLoader = new THREE.JSONLoader();
+				jsonLoader.load( "objects/f22_raptor/aircraft.json", addModelToScene );
+				function addModelToScene( geometry, materials ) {
+					var material = new THREE.MeshPhongMaterial({
+						map: new THREE.ImageUtils.loadTexture( 'objects/f22_raptor/FA-22_Raptor_P01.png' ),
+						normalMap: new THREE.ImageUtils.loadTexture( 'objects/f22_raptor/FA-22_Raptor_N.png' ),
+						normalScale: new THREE.Vector2( 1.5, 1.5 )
+					});
+					aircraft = new THREE.Mesh( geometry, material );
+					aircraft.scale.set(1,1,1);
+					aircraft.position.set(0,505,0);
+					aircraft.castShadow = true;
+					aircraft.recieveShadow = true;
+					aircraft.name = "aircraft";
+					scene.add(aircraft);
+					loadDisplay();
+					loadSeat();
+					loadPilot();
+					loadGlass();
+					render();
+				}
+				function loadDisplay() {
+					jsonLoader.load( "objects/f22_raptor/display.json", loadDisplayModel );
+					function loadDisplayModel( geometry, materials ) {
+						var material = new THREE.MeshPhongMaterial({
+							map: new THREE.ImageUtils.loadTexture( 'objects/f22_raptor/FA-22_Raptor_P01.png' )
+						});
+						var display = new THREE.Mesh( geometry, material );
+						display.position.set(0,0,0);
+						display.name = "display";
+						aircraft.add(display);
+					}
+				}
+				function loadSeat() {
+					jsonLoader.load( "objects/f22_raptor/seat.json", loadSeatModel );
+					function loadSeatModel( geometry, materials ) {
+						var material = new THREE.MeshPhongMaterial({
+							map: new THREE.ImageUtils.loadTexture( 'objects/f22_raptor/FA-22_Raptor_P01.png' )
+						});
+						var seat = new THREE.Mesh( geometry, material );
+						seat.position.set(0,0,0);
+						seat.name = "seat";
+						aircraft.add(seat);
+					}
+				}
+				function loadPilot() {
+					jsonLoader.load( "objects/f22_raptor/pilot.json", loadPilotModel );
+					function loadPilotModel( geometry, materials ) {
+						var material = new THREE.MeshPhongMaterial({
+							map: new THREE.ImageUtils.loadTexture( 'objects/f22_raptor/Pilot_usa.png' )
+						});
+						var pilot = new THREE.Mesh( geometry, material );
+						pilot.position.set(0,0,0);
+						pilot.name = "pilot";
+						aircraft.add(pilot);
+					}
+				}
+				function loadGlass() {
+					jsonLoader.load( "objects/f22_raptor/glass.json", loadGlassModel );
+					function loadGlassModel( geometry, materials ) {
+						var material = new THREE.MeshPhongMaterial({
+							transparent: true,
+							opacity: 0.35
+						});
+						var glass = new THREE.Mesh( geometry, material );
+						glass.position.set(0,0,0);
+						glass.name = "glass";
+						aircraft.add(glass);
+					}
+				}
+
+				//particles
+				THREE.ImageUtils.loadTexture( "images/particles/engine_smoke.png", undefined, particlesLoaded );
+				function particlesLoaded(mapA) {
+					var cloud = new THREE.Object3D();
+					aircraft.add(cloud);
+					leftEngine = new SpriteParticleSystem({
+						cloud:cloud,
+						rate:60, //5
+						num:60,	//30
+						texture:mapA,
+						scaleR:[0.005,0.005],	//0.1,4
+						speedR:[0,0.1],
+						rspeedR:[-0.1,0.1],
+						lifespanR:[1,2],
+						terminalSpeed:20
+					});
+					leftEngine.addForce(new THREE.Vector3(0,0,50)); //20
+					leftEngine.position.set(-0.65, -0.55, 6.75);
+					leftEngine.start();
+				}
+				THREE.ImageUtils.loadTexture( "images/particles/engine_smoke.png", undefined, particlesLoadedSecond );
+				function particlesLoadedSecond(mapA) {
+					var cloud = new THREE.Object3D();
+					aircraft.add(cloud);
+					rightEngine = new SpriteParticleSystem({
+						cloud:cloud,
+						rate:60, //5
+						num:60,	//30
+						texture:mapA,
+						scaleR:[0.005,0.005],	//0.1,4
+						speedR:[0,0.1],
+						rspeedR:[-0.1,0.1],
+						lifespanR:[1,2],
+						terminalSpeed:20
+					});
+					rightEngine.addForce(new THREE.Vector3(0,0,50)); //20
+					rightEngine.position.set(0.65, -0.55, 6.75);
+					rightEngine.start();
+				}
+
+		        /*
+		        ========== OBJECTS END ==========
+		        */
+
+		        /*
+		        ========== LIGHT ==========
+		        */
+				// var spotLight = new THREE.SpotLight( 0xffffff );
+				// spotLight.position.set( 0, 2000, 0 );
+				// spotLight.castShadow = true;
+				// spotLight.shadowCameraVisible = true;
+				// spotLight.shadowCameraNear = 100;
+				// spotLight.shadowCameraFar = 2100;
+				// scene.add(spotLight);
+
+				var light = new THREE.DirectionalLight( 0xffffff, 0.75 );
+				light.position.set( 0, 1000, 0 ).normalize();
+				scene.add( light );
+
+				/*
+		        ========== LIGHT END ==========
+		        */
+
+		        /*
+		        ========== POSTPROCESSING ==========
+		        */
+				composer = new THREE.EffectComposer( renderer );
+				composer.addPass( new THREE.RenderPass( scene, camera ) );
+				glitchPass = new THREE.GlitchPass();
+				glitchPass.renderToScreen = true;
+				composer.addPass( glitchPass );
+				/*
+		        ========== POSTPROCESSING END ==========
+		        */
+
+		        // position and point the camera to the center of the scene
+		        camera.position.set(0,0,0);
+		        camera.lookAt(scene.position);
+	
+		        // add controls
+				cameraControl = new THREE.OrbitControls(camera);
+				cameraControl.noKeys = true;
+				cameraControl.maxDistance = 35;
+
+		        // setup the control object for the control gui
+		        control = new function() {
+		            this.moveX = 0;
+		            this.rotateX = 0;
+		        };
+
+		        // add extras
+		        // addControlGui(control);
+		        addStatsObject();
+
+		        // add the output of the renderer to the html element
+		        document.body.appendChild(renderer.domElement);
+
+		        // call the render function, after the first render, interval is determined
+		        // by requestAnimationFrame
+		        // render();
+			}
+
+			/*
+			 * camera rotation
+			 */
+			var getElementPosition = function(element) {
+				var top = left = 0;
+				do {
+					top  += element.offsetTop  || 0;
+					left += element.offsetLeft || 0;
+					element =  element.offsetParent;
+				}
+				while (element);
+				return {top: top, left: left};
+			}
+
+			function addControlGui(controlObject) {
+		        var gui = new dat.GUI();
+		        gui.add(controlObject, 'moveX', -5, 5);
+		        gui.add(controlObject, 'rotateX', -1, 1);
+		    }
+
+		    function addStatsObject() {
+		        stats = new Stats();
+		        stats.setMode(0);
+		        stats.domElement.style.position = 'absolute';
+		        stats.domElement.style.left = '0px';
+		        stats.domElement.style.top = '0px';
+
+		        document.body.appendChild( stats.domElement );
+		    }
+
+		    function onDocumentMouseMove( event ) {
+				event.preventDefault();
+				mouse.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+				mouse.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+			}
+
+			//glitch
+			function updateOptions(glitchFlag) {
+				// var wildGlitch = document.getElementById('wildGlitch');
+				glitchPass.goWild=glitchFlag;
+			}
+
+		    //key down
+		    function onKeyDown(evt) {
+				switch (evt.keyCode) {
+					case 65: // 'a'
+						rotateLeft = true;
+						break;
+					case 68: // 'd'
+						rotateRight = true;
+						break;
+					case 87: // 'w'
+						moveAhead = true;
+						break;
+					case 83: // 's'
+						// moveBackwards = true;
+						break;
+					case 32: // spacebar
+				        // shoot here
+				        break;
+				    case 37: // 'left'
+				    	rollLeft = true;
+				    	break;
+				    case 38: // 'top'
+				    	pitchUp = true;
+				    	break;
+				    case 39: // 'right'
+				    	rollRight = true;
+				    	break;
+				    case 40: // 'bottom'
+				    	dive = true;
+				    	break; 
+				}
+			}
+
+			//key up
+			function onKeyUp(evt) {
+				switch (evt.keyCode) {
+					case 65: // 'a'
+						rotateLeft = false;
+						break;
+					case 68: // 'd'
+						rotateRight = false;
+						break;
+					case 87: // 'w'
+						moveAhead = false;
+						break;
+					case 83: // 's'
+						// moveBackwards = false;
+						break;
+					case 37: // 'left'
+				    	rollLeft = false;
+				    	break;
+				    case 38: // 'top'
+				    	pitchUp = false;
+				    	break;
+				    case 39: // 'right'
+				    	rollRight = false;
+				    	break;
+				    case 40: // 'bottom'
+				    	dive = false;
+				    	break; 
+				}
+			}
+
+			//resize
+			function onWindowResize() {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize( window.innerWidth, window.innerHeight );
+			}
+
+			//animation
+			function animate() {
+				collisionDetection();
+
+				requestAnimationFrame( animate );
+				render();
+			}
+
+
+		    /**
+		     * Called when the scene needs to be rendered. Delegates to requestAnimationFrame
+		     * for future renders
+		     */
+		    function render() {
+		    	var time = performance.now() * 0.001;
+
+				//moving
+				var dt = clock.getDelta();
+				// var aircraft = scene.getObjectByName('aircraft');
+				if(aircraft) {
+					if(!outOfBorder) {
+						//moving
+						var dYaw, dPos, ahead, dXaw, dZaw;
+						if (rotateLeft) {
+							dYaw = dt*rotationSpeed;
+							// aircraft.rotation.y += dYaw;
+							aircraft.rotateOnAxis( new THREE.Vector3(0,1,0), rotationAngle);
+						}
+						if (rotateRight) {
+							dYaw = dt*rotationSpeed;
+							// aircraft.rotation.y -= dYaw;
+							aircraft.rotateOnAxis( new THREE.Vector3(0,1,0), -rotationAngle);
+						}    
+						if (moveAhead) {
+							dPos = dt*translationSpeed; 
+							aircraft.translateZ(-dPos);
+						}
+						if (moveBackwards) {
+							dPos = dt*translationSpeed; 
+							aircraft.translateZ(dPos);
+						}
+						if ( rollLeft ) {
+							dZaw = dt*rotationSpeed;
+							// aircraft.rotation.z += dZaw;
+							aircraft.rotateOnAxis( new THREE.Vector3(0,0,1), rotationAngle);
+						}
+						if ( rollRight ) {
+							dZaw = dt*rotationSpeed;
+							// aircraft.rotation.z -= dZaw;
+							aircraft.rotateOnAxis( new THREE.Vector3(0,0,1), -rotationAngle);
+						}
+						if ( pitchUp ) {
+							dXaw = dt*rotationSpeed;
+							// aircraft.rotation.x += dXaw;
+							aircraft.rotateOnAxis( new THREE.Vector3(1,0,0), rotationAngle);
+						}
+						if ( dive ) {
+							dXaw = dt*rotationSpeed;
+							// aircraft.rotation.x -= dXaw;
+							aircraft.rotateOnAxis( new THREE.Vector3(1,0,0), -rotationAngle);
+						}
+					}
+					dPos = dt*translationSpeed; 
+					aircraft.translateZ(-dPos);
+				}
+
+				//update particles
+				if (leftEngine&&rightEngine) {
+			    	leftEngine.update(dt);
+			    	rightEngine.update(dt);
+				}
+
+				//out of border
+				if(!outOfBorder) {
+					if( aircraft.position.x > 1001 || aircraft.position.x < -1001 || aircraft.position.z > 1001 || aircraft.position.z < -1001 || aircraft.position.y > 2002 || aircraft.position.y < 0 ) {
+						outOfBorder = true;
+						updateOptions(outOfBorder);
+						var signalLost = document.getElementById('signal_lost');
+						signalLost.style.display = 'block';
+					}
+				}
+
+		        // update the camera
+        		cameraControl.update();
+        		if(aircraft) {
+		       		camera.lookAt(aircraft.position);
+		       		cameraControl.target = aircraft.position;
+		    	}
+
+		        // update stats
+		        stats.update();
+
+		        // and render the scene
+		        composer.render();
+		        // renderer.render(scene, camera);
+
+		        // render using requestAnimationFrame
+		        requestAnimationFrame(render);
+		    }
+
+
+		    /**
+		     * Function handles the resize event. This make sure the camera and the renderer
+		     * are updated at the correct moment.
+		     */
+		    function handleResize() {
+		        camera.aspect = window.innerWidth / window.innerHeight;
+		        camera.updateProjectionMatrix();
+		        renderer.setSize(window.innerWidth, window.innerHeight);
+		    }
+
+		    // calls the init function when the window is done loading.
+		    window.onload = init;
+		    // calls the handleResize function when the window is resized
+		    window.addEventListener('resize', handleResize, false);
+
+		</script>
+	</body>
+</html>

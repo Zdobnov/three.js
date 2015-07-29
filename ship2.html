@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+
+		<style>
+			* {
+				margin:0;
+				padding:0;
+			}
+			body {
+				width: 100%;
+				height: 100%;
+				overflow: hidden;
+			}
+		</style>
+	</head>
+	<body>
+
+		<!-- http://www.adobe.com/devnet/archive/html5/articles/javascript-motion-detection.html -->
+
+		<video id="monitor" autoplay style="display:none; width: 320px; height: 240px;"></video>
+		<div id="canvasLayers"   style="position: absolute; width:320px; height:240px; bottom:0; left:0">
+			<canvas id="videoCanvas" width="320" height="240" style="z-index: 1; position: absolute; left:0px; top:0px; opacity:0.5;"></canvas>
+			<canvas id="layer2"     width="320" height="240" style="z-index: 2; position: absolute; left:0px; top:0px; opacity:0.5;"></canvas>
+		</div>
+		<canvas id="blendCanvas" style="display: none; position: relative; left: 320px; top: 240px; width: 320px; height: 240px;"></canvas>
+		<div id="messageError"></div>
+		<div id="messageArea" style="position: relative; left: 0px; top: 270px;"></div>
+		<div id="container" style="z-index: 2; position: absolute; left:0px; top:0px"></div>
+		<div id="threejs" style="position: absolute; left:0px; top:0px"></div>
+
+		<!-- VIDEO -->
+		<script>
+			navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
+			window.URL = window.URL || window.webkitURL;
+			var camvideo = document.getElementById('monitor');
+				if (!navigator.getUserMedia) 
+				{
+					document.getElementById('messageError').innerHTML = 
+						'Sorry. <code>navigator.getUserMedia()</code> is not available.';
+				}
+				navigator.getUserMedia({video: true}, gotStream, noStream);
+			function gotStream(stream) 
+			{
+				if (window.URL) 
+				{   camvideo.src = window.URL.createObjectURL(stream);   } 
+				else // Opera
+				{   camvideo.src = stream;   }
+
+				camvideo.onerror = function(e) 
+				{   stream.stop();   };
+
+				stream.onended = noStream;
+			}
+			function noStream(e) 
+			{
+				var msg = 'No camera available.';
+				if (e.code == 1) 
+				{   msg = 'User denied access to use camera.';   }
+				document.getElementById('errorMessage').textContent = msg;
+			}
+		</script>
+
+		<script src="libs/three.min.js"></script>
+		<script src="libs/dat.gui.min.js"></script>
+		<script src="libs/stats.min.js"></script>
+		<script src="libs/OrbitControls.js"></script>
+		<script src="libs/Detector.js"></script>
+		<script src="libs/Mirror.js"></script>
+		<script src="libs/WaterShader.js"></script>
+		<script src="libs/SkyShader.js"></script>
+		<script>
+			// global variables
+		    var renderer;
+		    var scene;
+		    var camera;
+		    var control;	//GUI
+		    var stats;		//FPS
+
+		    var cameraControl;	//ortagonal camera
+
+		    //moving ahead
+		    var clock = new THREE.Clock();
+		    // ---
+		    var rotationSpeed = 0.05;
+  			var translationSpeed = 150;
+  			// ---
+  			var rotateLeft = false;
+			var rotateRight = false;
+			var moveAhead = false;
+			var moveBackwards = false;
+			window.onkeydown = onKeyDown;
+			window.onkeyup = onKeyUp;	
+
+			//web audio
+			var audioContext;
+			var sound;
+			var panner;
+
+		    /*
+			* Initializes the scene, camera and objects. Called when the window is
+			* loaded by using window.onload (see below)
+			*/
+			var container, stats;
+			var camera, scene, renderer;
+			var sphere;
+
+			//sailboat
+			var boat;
+
+			var parameters = {
+				width: 2000,
+				height: 2000,
+				widthSegments: 250,
+				heightSegments: 250,
+				depth: 1500,
+				param: 4,
+				filterparam: 1
+			}
+			
+			var waterNormals;
+
+			//raycaster
+		    var mouse = new THREE.Vector2(), INTERSECTED, raycaster;
+
+		    //VIDEO
+		    // assign global variables to HTML elements
+			var video = document.getElementById( 'monitor' );
+			var videoCanvas = document.getElementById( 'videoCanvas' );
+			var videoContext = videoCanvas.getContext( '2d' );
+			var layer2Canvas = document.getElementById( 'layer2' );
+			var layer2Context = layer2Canvas.getContext( '2d' );
+			var blendCanvas  = document.getElementById( "blendCanvas" );
+			var blendContext = blendCanvas.getContext('2d');
+			var messageArea = document.getElementById( "messageArea" );
+			var buttons;
+			var lastImageData;
+
+			init();
+			animate();
+
+			function init() {
+				// container = document.createElement( 'div' );
+				// document.body.appendChild( container );
+
+				renderer = new THREE.WebGLRenderer();
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				container = document.getElementById( 'threejs' );
+				container.appendChild( renderer.domElement );
+
+				scene = new THREE.Scene();
+
+				camera = new THREE.PerspectiveCamera( 55, window.innerWidth / window.innerHeight, 0.5, 3000000 );
+				camera.position.set( 2000, 750, 2000 );
+
+				controls = new THREE.OrbitControls( camera, renderer.domElement );
+				controls.userPan = false;
+				controls.userPanSpeed = 0.0;
+				controls.maxDistance = 5000.0;
+				controls.maxPolarAngle = Math.PI * 0.495;
+				controls.center.set( 0, 500, 0 );
+
+				var light = new THREE.HemisphereLight( 0xffffbb, 0x080820, 1 );
+				light.position.set( - 1, 0.2, - 1 );
+				scene.add( light );
+
+				//water
+				waterNormals = new THREE.ImageUtils.loadTexture( 'images/materials/waternormals.jpg' );
+				waterNormals.wrapS = waterNormals.wrapT = THREE.RepeatWrapping; 
+				water = new THREE.Water( renderer, camera, scene, {
+					textureWidth: 512, 
+					textureHeight: 512,
+					waterNormals: waterNormals,
+					alpha: 	1.0,
+					sunDirection: light.position.clone().normalize(),
+					sunColor: 0xffffff,
+					waterColor: 0x001e0f,
+					distortionScale: 50.0,
+				} );
+				mirrorMesh = new THREE.Mesh(
+					new THREE.PlaneBufferGeometry( parameters.width * 500, parameters.height * 500 ),
+					water.material
+				);
+				mirrorMesh.add( water );
+				mirrorMesh.rotation.x = - Math.PI * 0.5;
+				scene.add( mirrorMesh );
+
+				//raycaster
+		        raycaster = new THREE.Raycaster();
+
+				//sky initiation
+				initSky();
+
+				//sailboat
+				var jsonLoader = new THREE.JSONLoader();
+				jsonLoader.load( "objects/boat/boat-body.json", addModelToScene );
+				function addModelToScene( geometry, materials ) {
+					var material = new THREE.MeshPhongMaterial({
+						color: 0x31738F
+					});
+					boat = new THREE.Mesh( geometry, material );
+					boat.scale.set(2,2,2);
+					boat.position.set(0,-200,0);
+					boat.castShadow = true;
+					boat.recieveShadow = true;
+					boat.name = "boat";
+					scene.add(boat);
+					loadBaloon();
+					loadGlass();
+					loadMetalOne();
+					loadMetalTwo();
+					loadPlane();
+					loadSoft();
+					render();
+				}
+				function loadBaloon() {
+					jsonLoader.load( "objects/boat/boat-baloon.json", loadBaloonModel );
+					function loadBaloonModel( geometry, materials ) {
+						var material = new THREE.MeshPhongMaterial({
+							color: 0xffff00
+						});
+						var baloon = new THREE.Mesh( geometry, material );
+						baloon.name = "baloon";
+						boat.add(baloon);
+					}
+				}
+				function loadGlass() {
+					jsonLoader.load( "objects/boat/boat-glass.json", loadGlassModel );
+					function loadGlassModel( geometry, materials ) {
+						var material = new THREE.MeshPhongMaterial({
+							color: 0x000000,
+							transparent: true,
+							opacity: 0.65
+						});
+						var glass = new THREE.Mesh( geometry, material );
+						glass.name = "glass";
+						boat.add(glass);
+					}
+				}
+				function loadMetalOne() {
+					jsonLoader.load( "objects/boat/boat-metal-1.json", loadMetalOneModel );
+					function loadMetalOneModel( geometry, materials ) {
+						var material = new THREE.MeshPhongMaterial({
+							color: 0x333333
+						});
+						var metalOne = new THREE.Mesh( geometry, material );
+						metalOne.name = "metal-one";
+						boat.add(metalOne);
+					}
+				}
+				function loadMetalTwo() {
+					jsonLoader.load( "objects/boat/boat-metal-2.json", loadMetalTwoModel );
+					function loadMetalTwoModel( geometry, materials ) {
+						var material = new THREE.MeshPhongMaterial({
+							color: 0x333333
+						});
+						var metalTwo = new THREE.Mesh( geometry, material );
+						metalTwo.name = "metal-two";
+						boat.add(metalTwo);
+					}
+				}
+				function loadPlane() {
+					jsonLoader.load( "objects/boat/boat-plane.json", loadPlaneModel );
+					function loadPlaneModel( geometry, materials ) {
+						var material = new THREE.MeshPhongMaterial({
+							color: 0x666666
+						});
+						var plane = new THREE.Mesh( geometry, material );
+						plane.name = "plane";
+						boat.add(plane);
+					}
+				}
+				function loadSoft() {
+					jsonLoader.load( "objects/boat/boat-soft.json", loadSoftModel );
+					function loadSoftModel( geometry, materials ) {
+						var material = new THREE.MeshPhongMaterial({
+							color: 0xffffff
+						});
+						var soft = new THREE.Mesh( geometry, material );
+						soft.name = "soft";
+						boat.add(soft);
+					}
+				}
+
+				// web audio
+				window.AudioContext = window.AudioContext||window.webkitAudioContext;
+				audioContext = new AudioContext();
+				var sound = new Audio();
+				sound.addEventListener("canplaythrough",play,false);
+				sound.src = "sound/youtopia.mp3";
+				sound.loop = true;
+				function play() {
+					var source = audioContext.createMediaElementSource(sound);
+					panner = audioContext.createPanner();
+					panner.panningModel = 'HRTF';
+					panner.distanceModel = 'inverse';
+					panner.coneOuterGain = 10;
+					panner.refDistance = 100;
+					panner.maxDistance = 100000;
+					panner.rolloffFactor = 1;
+					panner.coneOuterAngle = 0; // outside this, volume is coneOuterGain
+					panner.coneInnerAngle = 360; // inside this, volume is full
+					// Set the panner node to be at the origin looking in the +z direction.
+					panner.setPosition(0,0,0);
+					panner.setOrientation(0,0,0); // unit vector
+					// Connect source->panner->destination
+					panner.connect(audioContext.destination);
+					source.connect(panner);
+					sound.play();
+				}
+
+				//stats
+				stats = new Stats();
+				stats.domElement.style.position = 'absolute';
+				stats.domElement.style.top = '0px';
+				stats.domElement.style.zIndex = 100;
+				document.body.appendChild( stats.domElement );
+
+				//resize
+				window.addEventListener( 'resize', onWindowResize, false );
+
+				//mousemove
+		        document.addEventListener( 'mousemove', onDocumentMouseMove, false );
+		        document.addEventListener( 'mousedown', onDocumentMouseClick, false );
+
+				// VIDEO SET UP
+				// these changes are permanent
+				videoContext.translate(320, 0);
+				videoContext.scale(-1, 1);
+				// background color if no video present
+				videoContext.fillStyle = '#005337';
+				videoContext.fillRect( 0, 0, videoCanvas.width, videoCanvas.height );				
+				buttons = [];
+				var button1 = new Image();
+				button1.src ="images/video_catch/cian.png";
+				var buttonData1 = { name:"cian", image:button1, x:320/2-16-10-32, y:10, w:32, h:32 };
+				buttons.push( buttonData1 );
+				var button2 = new Image();
+				button2.src ="images/video_catch/magenta.png";
+				var buttonData2 = { name:"magenta", image:button2, x:320/2-16, y:10, w:32, h:32 };
+				buttons.push( buttonData2 );
+				var button3 = new Image();
+				button3.src ="images/video_catch/yellow.png";
+				var buttonData3 = { name:"yellow", image:button3, x:320/2+10+16, y:10, w:32, h:32 };
+				buttons.push( buttonData3 );
+				var button4 = new Image();
+				button4.src ="images/video_catch/rotate_right.png";
+				var buttonData4 = { name:"right", image:button4, x:10, y:10, w:32, h:32 };
+				buttons.push( buttonData4 );
+				var button5 = new Image();
+				button5.src ="images/video_catch/rotate_left.png";
+				var buttonData5 = { name:"left", image:button5, x:278, y:10, w:32, h:32 };
+				buttons.push( buttonData5 );
+			}
+
+			function onDocumentMouseMove( event ) {
+				event.preventDefault();
+				mouse.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+				mouse.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+			}
+
+			function onDocumentMouseClick( event ) {
+				//raycater
+				// find intersections
+				raycaster.setFromCamera( mouse, camera );
+				var intersects = raycaster.intersectObjects( scene.children );
+				if ( intersects.length > 0 ) {
+					INTERSECTED = intersects[ 0 ].object;
+					try {
+						INTERSECTED.material.color.r = Math.random();
+						INTERSECTED.material.color.g = Math.random();
+						INTERSECTED.material.color.b = Math.random();
+					}
+					catch(e) {}
+				} else {
+					// if ( INTERSECTED ) INTERSECTED.material.emissive.setHex( INTERSECTED.currentHex );
+					INTERSECTED = null;
+				}
+			}
+
+			function initSky(){
+				// Add Sky Mesh
+				sky = new THREE.Sky();
+				scene.add( sky.mesh );
+				// Add Sun Helper
+				sunSphere = new THREE.Mesh( new THREE.SphereGeometry( 20000, 30, 30 ),
+					new THREE.MeshBasicMaterial({color: 0xffffff, wireframe: false }));
+				sunSphere.position.y = -700000;
+				sunSphere.visible = true;
+				scene.add( sunSphere );
+
+				/// GUI
+				// var effectController  = {
+				// 	turbidity: 10,
+				// 	reileigh: 2,
+				// 	mieCoefficient: 0.005,
+				// 	mieDirectionalG: 0.8,
+				// 	luminance: 1,
+				// 	inclination: 0.49, // elevation / inclination
+				// 	azimuth: 0.25, // Facing front,					
+				// 	sun: !true
+				// }
+				var effectController  = {
+					turbidity: 1,
+					reileigh: 1,
+					mieCoefficient: 0.0333,
+					mieDirectionalG: 0.75,
+					luminance: 0.75,
+					inclination: 0.44, // elevation / inclination
+					azimuth: 0.13, // Facing front,					
+					sun: !true,
+					shipSpeed: 150
+				}
+				var distance = 400000;
+
+				function guiChanged() {
+					var uniforms = sky.uniforms;
+					uniforms.turbidity.value = effectController.turbidity;
+					uniforms.reileigh.value = effectController.reileigh;
+					uniforms.luminance.value = effectController.luminance;
+					uniforms.mieCoefficient.value = effectController.mieCoefficient;
+					uniforms.mieDirectionalG.value = effectController.mieDirectionalG;
+					var theta = Math.PI * (effectController.inclination - 0.5);
+					var phi = 2 * Math.PI * (effectController.azimuth - 0.5);
+					sunSphere.position.x = distance * Math.cos(phi);
+					sunSphere.position.y = distance * Math.sin(phi) * Math.sin(theta); 
+					sunSphere.position.z = distance * Math.sin(phi) * Math.cos(theta); 
+					sunSphere.visible = effectController.sun;
+					sky.uniforms.sunPosition.value.copy(sunSphere.position);
+					//ship
+					translationSpeed = effectController.shipSpeed;
+				}
+
+				var gui = new dat.GUI();
+
+				gui.add( effectController, "turbidity", 1.0, 20.0, 0.1 ).onChange( guiChanged );
+				gui.add( effectController, "reileigh", 0.0, 4, 0.001 ).onChange( guiChanged );
+				gui.add( effectController, "mieCoefficient", 0.0, 0.1, 0.001 ).onChange( guiChanged );
+				gui.add( effectController, "mieDirectionalG", 0.0, 1, 0.001 ).onChange( guiChanged );
+				gui.add( effectController, "luminance", 0.0, 2).onChange( guiChanged );;
+				gui.add( effectController, "inclination", 0, 1, 0.0001).onChange( guiChanged );
+				gui.add( effectController, "azimuth", 0, 1, 0.0001).onChange( guiChanged );
+				gui.add( effectController, "sun").onChange( guiChanged );
+
+				var shipFolder = gui.addFolder('Ship');
+				shipFolder.add(effectController, 'shipSpeed', 150, 500, 25).name('Ship Speed').onChange(guiChanged);
+			
+				guiChanged();
+				camera.lookAt(sunSphere.position)
+			}
+
+			function onKeyDown(evt) {
+				switch (evt.keyCode) {
+					case 65: // 'a'
+						rotateLeft = true;
+						break;
+					case 68: // 'd'
+						rotateRight = true;
+						break;
+					case 87: // 'w'
+						moveAhead = true;
+						break;
+					case 83: // 's'
+						moveBackwards = true;
+						break;
+				}
+			}
+
+			function onKeyUp(evt) {
+				switch (evt.keyCode) {
+					case 65: // 'a'
+						rotateLeft = false;
+						break;
+					case 68: // 'd'
+						rotateRight = false;
+						break;
+					case 87: // 'w'
+						moveAhead = false;
+						break;
+					case 83: // 's'
+						moveBackwards = false;
+						break;
+				}
+			}
+
+			function onWindowResize() {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize( window.innerWidth, window.innerHeight );
+			}
+
+
+			function animate() {
+				//VIDEO
+    			blend();	
+				checkAreas();
+
+				requestAnimationFrame( animate );
+				render();
+			}
+
+			function render() {
+				var time = performance.now() * 0.001;
+
+				//moving
+				var dt = clock.getDelta();
+				var boat = scene.getObjectByName('boat');
+				if(boat) {
+					boat.rotation.z = Math.sin(time)/120;
+					//moving
+					var dYaw, dPos, ahead;
+					if (rotateLeft) {
+						dYaw = dt*rotationSpeed;
+						boat.rotation.y += dYaw;
+					}
+					if (rotateRight) {
+						dYaw = dt*rotationSpeed;
+						boat.rotation.y -= dYaw;
+					}    
+					if (moveAhead) {
+						dPos = dt*translationSpeed; 
+						boat.translateX(-dPos);
+					}
+					if (moveBackwards) {
+						dPos = dt*translationSpeed; 
+						boat.translateX(dPos);
+					}
+				}
+
+				//web audio
+				var p = camera.position;
+    			audioContext.listener.setPosition(p.x, p.y, p.z);
+    			if(panner&&boat) {
+    				var boatPosition = boat.position;
+    				panner.setPosition(boatPosition.x,boatPosition.y,boatPosition.z);
+    			}
+
+    			//VIDEO
+				if ( video.readyState === video.HAVE_ENOUGH_DATA ) 
+				{
+					// mirror video
+					videoContext.drawImage( video, 0, 0, videoCanvas.width, videoCanvas.height );
+					for ( var i = 0; i < buttons.length; i++ )
+						layer2Context.drawImage( buttons[i].image, buttons[i].x, buttons[i].y, buttons[i].w, buttons[i].h );		
+				}
+
+				water.material.uniforms.time.value += 1.0 / 60.0;
+				controls.update();
+				stats.update();
+				water.render();
+				renderer.render( scene, camera );
+			}
+
+			//VIDEO
+			function blend() 
+			{
+				var width  = videoCanvas.width;
+				var height = videoCanvas.height;
+				// get current webcam image data
+				var sourceData = videoContext.getImageData(0, 0, width, height);
+				// create an image if the previous image doesn't exist
+				if (!lastImageData) lastImageData = videoContext.getImageData(0, 0, width, height);
+				// create a ImageData instance to receive the blended result
+				var blendedData = videoContext.createImageData(width, height);
+				// blend the 2 images
+				differenceAccuracy(blendedData.data, sourceData.data, lastImageData.data);
+				// draw the result in a canvas
+				blendContext.putImageData(blendedData, 0, 0);
+				// store the current webcam image
+				lastImageData = sourceData;
+			}
+
+			function differenceAccuracy(target, data1, data2) 
+			{
+				if (data1.length != data2.length) return null;
+				var i = 0;
+				while (i < (data1.length * 0.25)) 
+				{
+					var average1 = (data1[4*i] + data1[4*i+1] + data1[4*i+2]) / 3;
+					var average2 = (data2[4*i] + data2[4*i+1] + data2[4*i+2]) / 3;
+					var diff = threshold(fastAbs(average1 - average2));
+					target[4*i]   = diff;
+					target[4*i+1] = diff;
+					target[4*i+2] = diff;
+					target[4*i+3] = 0xFF;
+					++i;
+				}
+			}
+			function fastAbs(value) 
+			{
+				return (value ^ (value >> 31)) - (value >> 31);
+			}
+			function threshold(value) 
+			{
+				return (value > 0x15) ? 0xFF : 0;
+			}
+
+			// check if white region from blend overlaps area of interest (e.g. triggers)
+			function checkAreas() 
+			{
+				for (var b = 0; b < buttons.length; b++)
+				{
+					// get the pixels in a note area from the blended image
+					var blendedData = blendContext.getImageData( buttons[b].x, buttons[b].y, buttons[b].w, buttons[b].h );
+						
+					// calculate the average lightness of the blended data
+					var i = 0;
+					var sum = 0;
+					var countPixels = blendedData.data.length * 0.25;
+					while (i < countPixels) 
+					{
+						sum += (blendedData.data[i*4] + blendedData.data[i*4+1] + blendedData.data[i*4+2]);
+						++i;
+					}
+					// calculate an average between of the color values of the note area [0-255]
+					var average = Math.round(sum / (3 * countPixels));
+					var boat = scene.getObjectByName('boat');
+					var baloon = scene.getObjectByName('baloon');
+					if (average > 50) // more than 20% movement detected
+					{
+						if (buttons[b].name == "cian") {
+							// cubeMaterial.map = colorRed;
+							if(boat) {
+								baloon.material.color.r = 0;
+								baloon.material.color.g = 1;
+								baloon.material.color.b = 1;
+							}
+						}
+						if (buttons[b].name == "magenta") {
+							// cubeMaterial.map = colorGreen;
+							if(boat) {
+								baloon.material.color.r = 1;
+								baloon.material.color.g = 0;
+								baloon.material.color.b = 1;
+							}
+						}
+						if (buttons[b].name == "yellow")	{
+							// cubeMaterial.map = colorBlue;
+							if(boat) {
+								baloon.material.color.r = 1;
+								baloon.material.color.g = 1;
+								baloon.material.color.b = 0;
+							}
+						}
+						if (buttons[b].name == "right")	{
+							if(boat) {
+								boat.rotation.y -= Math.PI*2/200;
+							}
+						}
+						if (buttons[b].name == "left")	{
+							if(boat) {
+								boat.rotation.y += Math.PI*2/200;
+							}
+						}
+					}
+				}
+			}
+
+		</script>
+	</body>
+</html>

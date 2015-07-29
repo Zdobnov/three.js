@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+
+		<style>
+			* {
+				margin:0;
+				padding:0;
+			}
+		</style>
+	</head>
+	<body>
+
+		<script src="libs/three.min.js"></script>
+		<script src="libs/dat.gui.min.js"></script>
+		<script src="libs/stats.min.js"></script>
+		<script src="libs/OrbitControls.js"></script>
+		<script src="libs/TrackballControls.js"></script>
+		<script src="libs/OBJLoader.js"></script>
+		<script src="libs/SpriteParticleSystem.js"></script>
+		<script>
+			// global variables
+		    var renderer;
+		    var scene;
+		    var camera;
+		    var control;	//GUI
+		    var stats;		//FPS
+
+		    var cameraControl;	//ortagonal camera
+		    var aircraft;		//aircraft
+		    var psys1,psys2,psys3,psys4;
+		    var clock = new THREE.Clock();
+
+		    /*
+			* Initializes the scene, camera and objects. Called when the window is
+			* loaded by using window.onload (see below)
+			*/
+			function init() {
+				// create a scene, that will hold all our elements such as objects, cameras and lights.
+		        scene = new THREE.Scene();
+
+		        // create a camera, which defines where we're looking at.
+		        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 10000);
+
+		        // position and point the camera to the center of the scene
+		        camera.position.x = 18;
+		        camera.position.y = 18;
+		        camera.position.z = 18;
+		        // camera.lookAt({x:0,y:10,z:0});
+
+		        // add controls
+				cameraControl = new THREE.TrackballControls(camera);
+
+		        // create a render, sets the background color and the size
+		        renderer = new THREE.WebGLRenderer({antialias:true});
+		        renderer.setClearColor(0xcccccc, 1.0);
+		        renderer.setSize(window.innerWidth, window.innerHeight);
+		        renderer.shadowMapEnabled = true;
+
+		        /*
+		        * objects --------------
+		        */
+
+		        //aircraft with JSON
+				var jsonLoader = new THREE.JSONLoader();
+				jsonLoader.load( "objects/aicraft.json", addModelToScene );
+				function addModelToScene( geometry, materials ) {
+					var material = new THREE.MeshPhongMaterial({
+						color: 0x333333,
+						vertexColors: THREE.FaceColors,
+						specular:0x333333,
+					});
+					aircraft = new THREE.Mesh( geometry, material );
+					// for (var i=0;i<geometry.faces.length;i++) 
+					// {
+					// 	face = geometry.faces[i];	
+					// 	face.color.setRGB(Math.random(),Math.random(),Math.random());		
+					// }
+					aircraft.scale.set(0.5,0.5,0.5);
+					aircraft.position.set(0,10,0);
+					aircraft.castShadow = true;
+					scene.add(aircraft);
+
+					// camera.lookAt(aircraft.position);
+
+					render();
+				}
+
+				//z-line
+				var zLineGeometry = new THREE.Geometry();
+				var zVertArray = zLineGeometry.vertices;
+				zVertArray.push(new THREE.Vector3(0, 10, -10),new THREE.Vector3(0, 10, 10));
+				zLineGeometry.computeLineDistances();
+				var zLineMaterial = new THREE.LineBasicMaterial({color: 0xffff00});
+				var zLine = new THREE.Line( zLineGeometry, zLineMaterial );
+				scene.add(zLine);
+				//x-line
+				var xLineGeometry = new THREE.Geometry();
+				var xVertArray = xLineGeometry.vertices;
+				xVertArray.push(new THREE.Vector3(-10, 10, 0),new THREE.Vector3(10, 10, 0));
+				xLineGeometry.computeLineDistances();
+				var xLineMaterial = new THREE.LineBasicMaterial({color: 0xffff00});
+				var xLine = new THREE.Line( xLineGeometry, xLineMaterial );
+				scene.add(xLine);
+
+				var floorMaterial = new THREE.MeshLambertMaterial( {side: THREE.DoubleSide } );
+				var floorGeometry = new THREE.PlaneGeometry(20, 20);
+				var floor = new THREE.Mesh(floorGeometry, floorMaterial);
+				floor.position.set(0,-0.01,0);
+				floor.rotation.x = Math.PI / 2;
+				floor.receiveShadow = true;
+				scene.add(floor);
+
+		        /*
+		        * objects end -----------
+		        */
+
+		        //helper grid
+		        var gridXZ = new THREE.GridHelper(10, 2.5),
+		        	gridXY = new THREE.GridHelper(10, 2.5),
+		        	gridYZ = new THREE.GridHelper(10, 2.5);
+				gridXZ.setColors(new THREE.Color(0xff3300),new THREE.Color(0x333333));
+				gridXZ.position.set(0,0,0);
+				scene.add(gridXZ);
+				gridXY.setColors(new THREE.Color(0x33ff00),new THREE.Color(0x333333));
+				gridXY.position.set(0,10,-10);
+				gridXY.rotation.x = 0.5*Math.PI;
+				scene.add(gridXY);
+				gridYZ.setColors(new THREE.Color(0x3399ff),new THREE.Color(0x333333));
+				gridYZ.position.set(-10,10,0);
+				gridYZ.rotation.z = 0.5*Math.PI;
+				scene.add(gridYZ);
+
+		        //skybox
+		        var imagePrefix = "images/skybox/ashcanyon_",
+		        	directions  = ["xpos", "xneg", "ypos", "yneg", "zneg", "zpos"],
+		        	imageSuffix = ".png",
+		        	skyGeometry = new THREE.CubeGeometry(5000,5000,5000),
+		        	materialArray = [];
+				for(var i=0;i<6;i++) {
+					materialArray.push(new THREE.MeshBasicMaterial({
+						map: THREE.ImageUtils.loadTexture( imagePrefix + directions[i] + imageSuffix ),
+						side: THREE.DoubleSide
+					}));
+				}
+				var skyMaterial = new THREE.MeshFaceMaterial( materialArray );
+				var skyBox = new THREE.Mesh( skyGeometry, skyMaterial );
+				scene.add( skyBox );
+
+		        // spotlight
+				var spotlight = new THREE.SpotLight(0xffffff);
+				spotlight.position.set(-10,80,-10);
+				spotlight.shadowCameraVisible = true;
+				spotlight.shadowDarkness = 0.75;
+				spotlight.intensity = 2;
+				spotlight.castShadow = true;
+				spotlight.name = 'spotlight';
+				// spotlight.shadowMapWidth = 4096; // default is 512
+				// spotlight.shadowMapHeight = 4096; // default is 512
+				scene.add(spotlight);
+				// var lightTarget = new THREE.Object3D();
+				// lightTarget.position.set(50,0,50);
+				// scene.add(lightTarget);
+				// spotlight.target = lightTarget;
+
+				var light = new THREE.PointLight(0xff00ff);
+				light.position.set(0,12,0);
+				light.intensity = 0.8;
+				light.name = "light";
+				scene.add(light);
+				var lightbulb = new THREE.Mesh( 
+					new THREE.SphereGeometry( 0.1,0, 0 ), 
+					new THREE.MeshBasicMaterial( { color: 0xff00ff } )
+				);
+				scene.add( lightbulb );
+				lightbulb.name = 'sublight';
+				lightbulb.position.set(0,12,0);
+
+				//particles
+				THREE.ImageUtils.loadTexture( "images/particles/smoke.png", undefined, particlesLoaded );
+				function particlesLoaded(mapA) {
+					var cloud = new THREE.Object3D();
+					scene.add(cloud);
+					psys1 = new SpriteParticleSystem({
+						cloud:cloud,
+						rate:60, //5
+						num:60,	//30
+						texture:mapA,
+						scaleR:[0.005,0.005],	//0.1,4
+						speedR:[0,0.1],
+						rspeedR:[-0.1,0.1],
+						lifespanR:[1,2],
+						terminalSpeed:20
+					});
+					psys1.addForce(new THREE.Vector3(0,0,20));
+					psys1.position.set(-4.65,9.9,0.5);
+					psys1.start();
+				}
+				THREE.ImageUtils.loadTexture( "images/particles/smoke.png", undefined, particlesLoaded2 );
+				function particlesLoaded2(mapA) {
+					var cloud = new THREE.Object3D();
+					scene.add(cloud);
+					psys2 = new SpriteParticleSystem({
+						cloud:cloud,
+						rate:60, //5
+						num:60,	//30
+						texture:mapA,
+						scaleR:[0.005,0.005],	//0.1,4
+						speedR:[0,0.1],
+						rspeedR:[-0.1,0.1],
+						lifespanR:[1,2],
+						terminalSpeed:20
+					});
+					psys2.addForce(new THREE.Vector3(0,0,20));
+					psys2.position.set(-3,9.9,-0.5);
+					psys2.start();
+				}
+				THREE.ImageUtils.loadTexture( "images/particles/smoke.png", undefined, particlesLoaded3 );
+				function particlesLoaded3(mapA) {
+					var cloud = new THREE.Object3D();
+					scene.add(cloud);
+					psys3 = new SpriteParticleSystem({
+						cloud:cloud,
+						rate:60, //5
+						num:60,	//30
+						texture:mapA,
+						scaleR:[0.005,0.005],	//0.1,4
+						speedR:[0,0.1],
+						rspeedR:[-0.1,0.1],
+						lifespanR:[1,2],
+						terminalSpeed:20
+					});
+					psys3.addForce(new THREE.Vector3(0,0,20));
+					psys3.position.set(3,9.9,-0.5);
+					psys3.start();
+				}
+				THREE.ImageUtils.loadTexture( "images/particles/smoke.png", undefined, particlesLoaded4 );
+				function particlesLoaded4(mapA) {
+					var cloud = new THREE.Object3D();
+					scene.add(cloud);
+					psys4 = new SpriteParticleSystem({
+						cloud:cloud,
+						rate:60, //5
+						num:60,	//30
+						texture:mapA,
+						scaleR:[0.005,0.005],	//0.1,4
+						speedR:[0,0.1],
+						rspeedR:[-0.1,0.1],
+						lifespanR:[1,2],
+						terminalSpeed:20
+					});
+					psys4.addForce(new THREE.Vector3(0,0,20));
+					psys4.position.set(4.65,9.9,0.5);
+					psys4.start();
+				}
+
+		        // setup the control object for the control gui
+		        control = new function() {
+		            this.rotationSpeed = -0.001;
+		            this.perfectShadowQuality = false;
+		            this.toggleCamera = false;
+
+		            //aircraft
+		            this.duffuseColor = "#333333";
+		            // this.ambientColor = "#000000";
+		            this.emissiveColor = "#000000";
+		            this.specularColor = "#333333";
+		            this.specularColor = "#333333";
+		            this.material = "Phong";
+		            // this.perPixel = false;
+		            // this.shininess = 30;
+
+		            // this.ambientLightColor = ambientLight.color.getHex();
+            		// this.directionalLightColor = directionalLight.color.getHex();
+		        };
+
+		        // add extras
+		        addControlGui(control);
+		        addStatsObject();
+
+		        // add the output of the renderer to the html element
+		        document.body.appendChild(renderer.domElement);
+
+		        // call the render function, after the first render, interval is determined
+		        // by requestAnimationFrame
+		        // render();
+			}
+
+			// GUI
+			function addControlGui(controlObject) {
+		        var gui = new dat.GUI();
+		        gui.add(controlObject, 'rotationSpeed', -0.01, 0.01);
+		        // gui.addColor(controlObject, 'duffuseColor').name('Color (Diffuse)').onChange(function(value) {
+		        // 	aircraft.material.color.setHex(value.replace("#","0x"));
+		        // });
+		        gui.add(controlObject, 'perfectShadowQuality', false).onChange(function(value){
+		        	if(value) {
+		        		var spotLight = scene.getObjectByName('spotlight');
+		        		// spotLight.shadowMapHeight = 4096;
+		        		// spotLight.shadowMapWidth = 4096;
+		        		// camera.updateProjectionMatrix();
+		        	}
+		        });
+		        gui.add(controlObject, 'toggleCamera', false).onChange(function(value){
+		        	value?(function(){
+		        		cameraControl.enabled = false;
+		        	})():(function(){
+		        		cameraControl.enabled = true;
+		        	})();
+		        });
+		        var folderOne = gui.addFolder('Aircraft');
+				folderOne.addColor(controlObject, 'duffuseColor').name('Color (Diffuse)').onChange(function(value) {
+		        	aircraft.material.color.setHex(value.replace("#","0x"));
+		        });
+		        // folderOne.addColor(controlObject, 'ambientColor').name('Color (Ambient)').onChange(function(value) {
+		        // 	aircraft.material.ambient.setHex(value.replace("#","0x"));
+		        // });
+		        folderOne.addColor(controlObject, 'emissiveColor').name('Color (Emissive)').onChange(function(value) {
+		        	aircraft.material.emissive.setHex(value.replace("#","0x"));
+		        });
+		        folderOne.addColor(controlObject, 'specularColor').name('Color (Specular)').onChange(function(value) {
+		        	aircraft.material.specular.setHex(value.replace("#","0x"));
+		        });
+		        folderOne.add(controlObject, 'material',["Basic","Lambert","Phong","Normal","Wireframe"]).name('Material Type').onChange(function(value){
+		        	if (value == "Basic")
+						aircraft.material = new THREE.MeshBasicMaterial({color: 0x333333});
+					else if (value == "Lambert")
+						aircraft.material = new THREE.MeshLambertMaterial({color: 0x333333});
+					else if (value == "Phong")
+						aircraft.material = new THREE.MeshPhongMaterial({color: 0x333333});
+					else if (value == "Normal")
+						aircraft.material = new THREE.MeshNormalMaterial();
+					else // (value == "Wireframe")
+						aircraft.material = new THREE.MeshBasicMaterial({wireframe: true});
+					cube.material = newMaterial;
+		        });
+
+		        // folderOne.add(controlObject, 'shininess', 0, 100, 10);
+		        // folderOne.add(controlObject, 'perPixel', false).onChange(function(value){
+		        // 	value?(function(){
+		        // 		aircraft.material.wrapAround = false;
+		        // 	})():(function(){
+		        // 		aircraft.material.wrapAround = true;
+		        // 	})();
+		        // });
+		    }
+
+		    function addStatsObject() {
+		        stats = new Stats();
+		        stats.setMode(0);
+		        stats.domElement.style.position = 'absolute';
+		        stats.domElement.style.left = '0px';
+		        stats.domElement.style.top = '0px';
+		        document.body.appendChild( stats.domElement );
+		    }
+
+		    /**
+		     * Called when the scene needs to be rendered. Delegates to requestAnimationFrame
+		     * for future renders
+		     */
+		    var mot = {
+		        radius:2, // радиус окружности 
+		        f:0,
+		        s:2*Math.PI/180
+		    }
+
+		    function render() {
+		        // update the camera
+		        // aircraft.rotation.y += control.rotationSpeed;
+
+		        //light motion
+		        var light = scene.getObjectByName('light');
+		        var sublight = scene.getObjectByName('sublight');
+		        light.position.z =  mot.radius * Math.sin(mot.f);
+		        light.position.x =  mot.radius * Math.cos(mot.f);
+		        sublight.position.z =  mot.radius * Math.sin(mot.f);
+		        sublight.position.x =  mot.radius * Math.cos(mot.f);
+		        mot.f += mot.s;
+
+		        var dt = clock.getDelta();
+			    if (psys1&&psys2&&psys3&&psys4) {
+			    	psys1.update(dt);
+				    psys2.update(dt);
+				    psys3.update(dt);
+				    psys4.update(dt);
+				}
+
+		        // update the camera
+        		cameraControl.update();
+        		cameraControl.object.lookAt(aircraft.position);
+
+		        // update stats
+		        stats.update();
+
+		        // and render the scene
+		        renderer.render(scene, camera);
+
+		        // render using requestAnimationFrame
+		        requestAnimationFrame(render);
+		    }
+
+
+		    /**
+		     * Function handles the resize event. This make sure the camera and the renderer
+		     * are updated at the correct moment.
+		     */
+		    function handleResize() {
+		        camera.aspect = window.innerWidth / window.innerHeight;
+		        camera.updateProjectionMatrix();
+		        renderer.setSize(window.innerWidth, window.innerHeight);
+		    }
+
+		    // calls the init function when the window is done loading.
+		    window.onload = init;
+		    // calls the handleResize function when the window is resized
+		    window.addEventListener('resize', handleResize, false);
+
+		</script>
+	</body>
+</html>

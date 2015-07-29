@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>06.01 - CSS3DSkeletons</title>
+    <script src="libs/three.min.js"></script>
+    <script src="libs/dat.gui.min.js"></script>
+    <script src="libs/stats.min.js"></script>
+    <script src="libs/CSS3DRenderer.js"></script>
+    <script src="libs/OrbitControls.js"></script>
+    <style>
+        body {
+            /* set margin to 0 and overflow to hidden, to go fullscreen */
+            margin: 0;
+            overflow: hidden;
+            background-color: black;
+        }
+
+        .large {
+            font-size: xx-large;
+        }
+        .dg.ac {z-index:1000 !important;}
+        div.d3 {
+            box-shadow: 0 0 10px #ffffff;
+            border-radius:10px;
+            margin:10px;
+            padding:10px;
+        }
+    </style>
+</head>
+<script>
+
+    var string = '<div class="d3"><h1>This is an H1 Element.</h1<span class="large">Hello Essential Three.js</span><textarea> And this is a textarea</textarea></div>';
+
+    // global variables
+    var renderer;
+    var scene;
+    var camera;
+    var control;
+    var controls;
+    var stats;
+
+    var cube = new THREE.BoxGeometry(4, 4, 4);
+    var objects = [];
+    var divCount = 0;
+
+    /**
+     * Initializes the scene, camera and objects. Called when the window is
+     * loaded by using window.onload (see below)
+     */
+    function init() {
+
+        // create a scene, that will hold all our elements such as objects, cameras and lights.
+        scene = new THREE.Scene();
+
+        // create a camera, which defines where we're looking at.
+        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+        // create a render, sets the background color and the size
+
+
+        renderer = new THREE.CSS3DRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.domElement.style.position = 'absolute';
+        renderer.domElement.style.top = 0;
+
+        // position and point the camera to the center of the scene
+        camera.position.x = 400;
+        camera.position.y = 400;
+        camera.position.z = 400;
+        camera.lookAt(scene.position);
+
+
+        // setup the control object for the control gui
+        control = new function() {
+            this.rotationX = 0;
+            this.rotationY = 0;
+            this.rotationZ = 0;
+        };
+
+        // add extras
+        addControlGui(control);
+        addStatsObject();
+
+
+        // add the output of the renderer to the html element
+        document.body.appendChild(renderer.domElement);
+        var clone = createCSS3DObject(string);
+
+        clone.position.set(0,0,0);
+        clone.name="clone";
+
+        scene.add(clone);
+
+        // call the render function, after the first render, interval is determined
+        // by requestAnimationFrame
+        render();
+    }
+
+    function createCSS3DObject(s) {
+        // create outerdiv and set inner HTML from supplied string
+        var div = document.createElement('div');
+        div.innerHTML = s;
+
+        // set some values on the div to style it, standard CSS
+        div.style.width = '370px';
+        div.style.height = '370px';
+        div.style.opacity = 0.7;
+        div.style.background = new THREE.Color(Math.random() * 0xffffff).getStyle();
+
+        // create a CSS3Dobject and return it.
+        var object = new THREE.CSS3DObject(div);
+        return object;
+    }
+
+    function addControlGui(controlObject) {
+        var gui = new dat.GUI();
+        gui.add(controlObject, 'rotationX', -1, 1);
+        gui.add(controlObject, 'rotationY', -1, 1);
+        gui.add(controlObject, 'rotationZ', -1, 1);
+    }
+
+    function addStatsObject() {
+        stats = new Stats();
+        stats.setMode(0);
+
+        stats.domElement.style.position = 'absolute';
+        stats.domElement.style.left = '0px';
+        stats.domElement.style.top = '0px';
+
+        document.body.appendChild(stats.domElement);
+    }
+
+
+    /**
+     * Called when the scene needs to be rendered. Delegates to requestAnimationFrame
+     * for future renders
+     */
+    function render() {
+        scene.getObjectByName('clone').rotation.x = control.rotationX;
+        scene.getObjectByName('clone').rotation.y = control.rotationY;
+        scene.getObjectByName('clone').rotation.z = control.rotationZ;
+
+        // update stats
+        stats.update();
+
+        // and render the scene
+        renderer.render(scene, camera);
+
+        // render using requestAnimationFrame
+        requestAnimationFrame(render);
+    }
+
+
+    /**
+     * Function handles the resize event. This make sure the camera and the renderer
+     * are updated at the correct moment.
+     */
+    function handleResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // calls the init function when the window is done loading.
+    window.onload = init;
+    // calls the handleResize function when the window is resized
+    window.addEventListener('resize', handleResize, false);
+
+</script>
+<body>
+
+</body>
+
+</html>

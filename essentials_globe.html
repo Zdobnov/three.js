@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+
+		<style>
+			* {
+				margin:0;
+				padding:0;
+			}
+			body {
+				overflow: hidden;
+			}
+		</style>
+	</head>
+	<body>
+
+		<script src="libs/three.min.js"></script>
+		<!-- orbit camera -->
+		<script src="libs/OrbitControls.js"></script>
+		<script src="libs/dat.gui.min.js"></script>
+		<script src="libs/stats.min.js"></script>
+
+		<script src="libs/glitch/EffectComposer.js"></script>
+        <script src="libs/glitch/RenderPass.js"></script>
+        <script src="libs/glitch/CopyShader.js"></script>
+        <script src="libs/glitch/ShaderPass.js"></script>
+        <script src="libs/glitch/MaskPass.js"></script>
+
+        <!-- === Custom Shader Code (SUN SPRITE GLOW SHADER) === -->
+		<script id="vertexShader" type="x-shader/x-vertex">
+		varying vec2 vUv;
+		void main() 
+		{ 
+		    vUv = uv;
+		    gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+		}
+		</script>
+
+		<!-- fragment shader a.k.a. pixel shader -->
+		<script id="fragmentShader" type="x-shader/x-vertex"> 
+		uniform sampler2D baseTexture;
+		uniform float baseSpeed;
+		uniform sampler2D noiseTexture;
+		uniform float noiseScale;
+		uniform float alpha;
+		uniform float time;
+		varying vec2 vUv;
+		void main() 
+		{
+			vec2 uvTimeShift = vUv + vec2( -0.7, 1.5 ) * time * baseSpeed;	
+			vec4 noiseGeneratorTimeShift = texture2D( noiseTexture, uvTimeShift );
+			vec2 uvNoiseTimeShift = vUv + noiseScale * vec2( noiseGeneratorTimeShift.r, noiseGeneratorTimeShift.b );
+			vec4 baseColor = texture2D( baseTexture, uvNoiseTimeShift );
+
+			baseColor.a = alpha;
+			gl_FragColor = baseColor;
+		}  
+		</script>
+		<!-- ============================== -->
+
+		<script>
+			// global variables
+		    var renderer;
+		    var scene;
+		    var camera;
+		    var control;	//GUI
+		    var stats;		//FPS
+		    var cameraControl;	//ortagonal camera
+
+		    // background stuff
+	        var cameraBG;
+	        var sceneBG;
+	        var composer;
+	        var clock;
+
+		    /*
+			* Initializes the scene, camera and objects. Called when the window is
+			* loaded by using window.onload (see below)
+			*/
+			function init() {
+				clock = new THREE.Clock();
+
+				// create a scene, that will hold all our elements such as objects, cameras and lights.
+		        scene = new THREE.Scene();
+
+		        // create a camera, which defines where we're looking at.
+		        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100000);
+
+		        // create a render, sets the background color and the size
+		        renderer = new THREE.WebGLRenderer({antialias:true});
+		        renderer.setClearColor(0x000000, 1.0);
+		        // renderer.shadowMapEnabled = true;
+		        renderer.setSize(window.innerWidth, window.innerHeight);
+
+		        /*
+		        * objects --------------
+		        */
+
+		        // scene.add(new THREE.AxisHelper(10000));
+
+		        // create a sphere
+		        var sphereGeometry = new THREE.SphereGeometry(13, 60, 60);
+		        var sphereMaterial = createEarthMaterial();
+		        var earthMesh = new THREE.Mesh(sphereGeometry, sphereMaterial);
+		        earthMesh.name = 'earth';
+		        earthMesh.position.set(10000,0,0);
+		        earthMesh.castShadow = true;
+		        scene.add(earthMesh);
+
+		        // create a cloudGeometry, slighly bigger than the original sphere
+		        var cloudGeometry = new THREE.SphereGeometry(13.05, 60, 60);
+		        var cloudMaterial = createCloudMaterial();
+		        var cloudMesh = new THREE.Mesh(cloudGeometry, cloudMaterial);
+		        cloudMesh.name = 'clouds';
+		        cloudMesh.position.set(10000,0,0);
+		        scene.add(cloudMesh);
+
+		        // create a moon
+		        var moonGeometry = new THREE.SphereGeometry(1.8, 32, 32);
+		        var moonMaterial = new THREE.MeshPhongMaterial({
+		        	map: THREE.ImageUtils.loadTexture("planets/moonmap4k.jpg")
+		        });
+		        var moonMesh = new THREE.Mesh(moonGeometry, moonMaterial);
+		        moonMesh.name = 'moon';
+		        moonMesh.position.set(10020,0,-20);
+		        moonMesh.receiveShadow = true;
+		        scene.add(moonMesh);
+
+		        //create sun dynamical material
+		        var noiseTexture = new THREE.ImageUtils.loadTexture('images/materials/cloud.png');
+					noiseTexture.wrapS = noiseTexture.wrapT = THREE.RepeatWrapping;
+		        var lavaTexture = new THREE.ImageUtils.loadTexture('images/materials/texture_sun.jpg');
+					lavaTexture.wrapS = lavaTexture.wrapT = THREE.RepeatWrapping;
+				// use "this." to create global object
+				this.customUniforms = {
+					baseTexture: 	{ type: "t", value: lavaTexture },
+					baseSpeed: 		{ type: "f", value: 0.005 },	//speed of texture changing
+					noiseTexture: 	{ type: "t", value: noiseTexture },
+					noiseScale:		{ type: "f", value: 0.5337 },
+					alpha: 			{ type: "f", value: 1.0 },
+					time: 			{ type: "f", value: 1.0 }
+				};
+				// create custom material from the shader code above
+				//   that is within specially labeled script tags
+				var customMaterial = new THREE.ShaderMaterial({
+				    uniforms: customUniforms,
+					vertexShader:   document.getElementById('vertexShader').textContent,
+					fragmentShader: document.getElementById('fragmentShader').textContent
+				});
+				// other material properties
+				customMaterial.side = THREE.DoubleSide;
+
+				//create sun
+		        var sunGeometry = new THREE.SphereGeometry(1391, 64, 64);
+		        var sunMaterial = new THREE.MeshBasicMaterial();
+		        var sunMesh = new THREE.Mesh(sunGeometry, customMaterial);
+		        sunMesh.name = 'sun';
+		        sunMesh.position.set(0,0,0);
+		        scene.add(sunMesh);
+				
+				// SUPER SIMPLE GLOW EFFECT
+				// use sprite because it appears the same from all angles
+				var sunSpriteMaterial = new THREE.SpriteMaterial( 
+				{ 
+					map: new THREE.ImageUtils.loadTexture( 'images/materials/glow.png' ), 
+					useScreenCoordinates: false,
+					// alignment: THREE.SpriteAlignment.center,
+					color: 0xffed84,
+					transparent: false,
+					blending: THREE.AdditiveBlending
+				});
+				var sunSprite = new THREE.Sprite(sunSpriteMaterial);
+				sunSprite.scale.set(10000, 10000, 1.0);
+				sunMesh.add(sunSprite); // this centers the glow at the mesh
+
+
+				//earth orbit
+				var radius   = 10000,
+				    segments = 256,
+				    material = new THREE.LineBasicMaterial( { color: 0xffffff } ), 
+				    geometry = new THREE.CircleGeometry( radius, segments ),
+				    circle = new THREE.Line( geometry, material );
+
+				// Remove center vertex
+				geometry.vertices.shift();
+				circle.rotation.x = Math.PI/2;
+				circle.name = "Earth Orbit";
+				scene.add( circle );
+
+
+				//x-line
+				var xLineGeometry = new THREE.Geometry();
+				var xVertArray = xLineGeometry.vertices;
+				xVertArray.push(new THREE.Vector3(0,0,0),new THREE.Vector3(10000,0,0));
+				xLineGeometry.computeLineDistances();
+				var xLineMaterial = new THREE.LineDashedMaterial({color: 0xffffff, dashSize: 100, gapSize: 100});	/* LineBasicMaterial */
+				var xLine = new THREE.Line( xLineGeometry, xLineMaterial );
+				scene.add(xLine);
+
+
+		        /*
+		        * objects end -----------
+		        */
+
+		        // position and point the camera to the center of the scene
+		        camera.position.x = 10050;
+        		camera.position.y = 5;
+        		camera.position.z = -35;
+		        camera.lookAt(scene.position);
+
+		        // add controls
+				cameraControl = new THREE.OrbitControls(camera);
+				cameraControl.autoRotate = true;
+				cameraControl.autoRotateSpeed = 0.001;
+
+		        // now add some better lighting
+		        var ambientLight = new THREE.AmbientLight(0x111111);
+		        ambientLight.name='ambient';
+		        scene.add(ambientLight);
+
+		        // add sunlight light
+				var spotlight = new THREE.SpotLight(0xffffff);
+				spotlight.position.set(0,0,0);
+				spotlight.shadowDarkness = 0.5;
+				spotlight.intensity = 1;
+				spotlight.shadowCameraFar = 10100;
+				spotlight.name = "spotLight";
+				scene.add(spotlight);
+
+				// change the direction this spotlight is facing
+				var lightTarget = new THREE.Object3D();
+				lightTarget.position.set(10000,0,0);
+				scene.add(lightTarget);
+				spotlight.target = lightTarget;
+
+		        // setup the control object for the control gui
+		        control = new function() {
+		            this.rotationSpeed = 0.001;
+		            this.ambientLightColor = ambientLight.color.getHex();
+		            this.spotLightColor = spotlight.color.getHex();
+		            this.toggleCamera = false;
+		        };
+
+		        // add extras
+		        addControlGui(control);
+		        addStatsObject();
+
+	            // add background using a camera
+	            cameraBG = new THREE.OrthographicCamera(-window.innerWidth, window.innerWidth, window.innerHeight, -window.innerHeight, -10000, 10000);
+	            cameraBG.position.z = 50;
+	            sceneBG = new THREE.Scene();
+
+	            var materialColor = new THREE.MeshBasicMaterial({ map: THREE.ImageUtils.loadTexture("planets/starry_background.jpg"), depthTest: false });
+	            var bgPlane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), materialColor);
+	            bgPlane.position.z = -100;
+	            bgPlane.scale.set(window.innerWidth * 2, window.innerHeight * 2, 1);
+	            sceneBG.add(bgPlane);
+
+	            // setup the composer steps
+	            // first render the background
+	            var bgPass = new THREE.RenderPass(sceneBG, cameraBG);
+	            // next render the scene (rotating earth), without clearing the current output
+	            var renderPass = new THREE.RenderPass(scene, camera);
+	            renderPass.clear = false;
+	            // finally copy the result to the screen
+	            var effectCopy = new THREE.ShaderPass(THREE.CopyShader);
+	            effectCopy.renderToScreen = true;
+
+	            // add these passes to the composer
+	            composer = new THREE.EffectComposer(renderer);
+	            composer.addPass(bgPass);
+	            composer.addPass(renderPass);
+	            composer.addPass(effectCopy);
+
+
+		        // add the output of the renderer to the html element
+		        document.body.appendChild(renderer.domElement);
+
+		        // call the render function, after the first render, interval is determined
+		        // by requestAnimationFrame
+		        render();
+			}
+
+			//earth material
+			function createEarthMaterial() {
+		        // 4096 is the maximum width for maps
+		        var earthTexture = THREE.ImageUtils.loadTexture("planets/earthmap4k.jpg");
+		        var earthMaterial = new THREE.MeshPhongMaterial();
+		        earthMaterial.map = earthTexture;
+		        var specularMap = THREE.ImageUtils.loadTexture("planets/earthspec4k.jpg");
+				earthMaterial.specularMap = specularMap;
+				earthMaterial.specular = new THREE.Color(0x262626);
+				var bumpMap = THREE.ImageUtils.loadTexture("planets/earthbump4k.jpg");
+				var normalMap = THREE.ImageUtils.loadTexture("planets/earth_normalmap_flat4k.jpg");
+				earthMaterial.normalMap = normalMap;
+    			earthMaterial.normalScale = new THREE.Vector2(0.5, 0.7);
+		        return earthMaterial;
+		    }
+
+		    function createCloudMaterial() {
+		        var cloudTexture = THREE.ImageUtils.loadTexture("planets/fair_clouds_4k.png");
+		        var cloudMaterial = new THREE.MeshPhongMaterial();
+		        cloudMaterial.map = cloudTexture;
+		        cloudMaterial.transparent = true;
+		        var bumpMap = THREE.ImageUtils.loadTexture("planets/earthhiresclouds4K.png");
+		        cloudMaterial.normalScale = new THREE.Vector2(0.5, 0.7);
+		        return cloudMaterial;
+		    }
+
+			function addControlGui(controlObject) {
+		        var gui = new dat.GUI();
+		        gui.add(controlObject, 'rotationSpeed', -0.01, 0.01);
+		        gui.addColor(controlObject, 'ambientLightColor');
+           		gui.addColor(controlObject, 'spotLightColor');
+           		gui.add(controlObject, 'toggleCamera', false).onChange(function(value){
+		        	value?(function(){
+		        		cameraControl.enabled = false;
+		        	})():(function(){
+		        		cameraControl.enabled = true;
+		        	})();
+		        });
+		    }
+
+		    function addStatsObject() {
+		        stats = new Stats();
+		        stats.setMode(0);
+
+		        stats.domElement.style.position = 'absolute';
+		        stats.domElement.style.left = '0px';
+		        stats.domElement.style.top = '0px';
+
+		        document.body.appendChild( stats.domElement );
+		    }
+
+		    /**
+		     * Called when the scene needs to be rendered. Delegates to requestAnimationFrame
+		     * for future renders
+		     */
+		    var mot = {
+		        radius:50, // радиус окружности 
+		        f:0,
+		        s:2*Math.PI/1440
+		    }
+
+
+		    function render() {
+		        // update the camera
+		        scene.getObjectByName('earth').rotation.y += control.rotationSpeed;
+		        scene.getObjectByName('clouds').rotation.y += (control.rotationSpeed-0.0005);
+		        scene.getObjectByName('moon').rotation.y += (control.rotationSpeed*2);
+
+		        // update light colors
+            	scene.getObjectByName('ambient').color = new THREE.Color(control.ambientLightColor);
+            	scene.getObjectByName('spotLight').color = new THREE.Color(control.spotLightColor);
+
+            	scene.getObjectByName('moon').position.z =  mot.radius * Math.sin(mot.f);
+		        scene.getObjectByName('moon').position.x =  10025 - mot.radius * (1-Math.cos(mot.f));
+		        mot.f += (mot.s+control.rotationSpeed);
+
+            	//sun texture updating
+            	var delta = clock.getDelta();
+				customUniforms.time.value += delta;
+
+		        // update the camera
+        		cameraControl.update();
+
+		        // update stats
+		        stats.update();
+
+		        // and render the scene
+		        renderer.autoClear = false;
+            	composer.render();
+
+		        // render using requestAnimationFrame
+		        requestAnimationFrame(render);
+		    }
+
+		    /**
+		     * Function handles the resize event. This make sure the camera and the renderer
+		     * are updated at the correct moment.
+		     */
+		    function handleResize() {
+		        camera.aspect = window.innerWidth / window.innerHeight;
+		        camera.updateProjectionMatrix();
+		        renderer.setSize(window.innerWidth, window.innerHeight);
+		    }
+
+		    // calls the init function when the window is done loading.
+		    window.onload = init;
+		    // calls the handleResize function when the window is resized
+		    window.addEventListener('resize', handleResize, false);
+
+		</script>
+	</body>
+</html>
